@@ -19,14 +19,13 @@ classdef Dist_MCTS
         prob_available = 1.0; % how likely is it that I am available
         raw_reward = 0.0; % how much am I worth unclaimed
         cum_reward = 0.0; % what is the total cumulative reward across all pulls
-        mean_reward = 0.0; % cum reward / n_pulls
         travel_cost = 0.0; % dist from parent to me
         max_kid = -1; % used for debugging
         
         use_greedy = false;
         use_ucb = false;
         use_ducb = false;
-        use_ucb_m = true;
+        use_m_ucb = true;
         
         beta = 1.41;
         epsilon = 0.5;
@@ -130,12 +129,12 @@ classdef Dist_MCTS
             maxR = -inf;
             for i=1:length(obj.kids)
                 obj.kids{i}.cum_reward = obj.kids{i}.cum_reward * obj.gamma;
-                obj.kids{i}.mean_reward = obj.kids{i}.cum_reward / max(0.01,obj.kids{i}.n_pulls);
+                obj.kids{i}.mean_reward = obj.kids{i}.cum_reward / max(0.01,obj.kid{i}.n_pulls);
                 if obj.kids{i}.mean_reward < minR
-                    minR = obj.kids{i}.mean_reward;
+                    minR = mean_reward;
                 end
                 if obj.kids{i}.mean_reward > maxR
-                    maxR = obj.kids{i}.mean_reward / max(0.01,obj.kids{i}.n_pulls);
+                    maxR = obj.kids{i}.mean_reward / max(0.01,obj.kid{i}.n_pulls);
                 end
             end
 
@@ -296,7 +295,7 @@ classdef Dist_MCTS
                     obj.down_branch_reward = obj.my_reward + maxR;
                     if maxI > 0
                         % update searched kids cumulative reward
-                        obj.kids{maxI}.cum_reward = obj.kids{maxI}.cum_reward + (obj.kids{maxI}.down_branch_reward-minR) / max(0.001, maxR-minR);
+                        obj.kids{maxI}.cum_reward = (obj.kids{maxI}.down_branch_reward-minR) / max(0.001, maxR-minR) + obj.kids{maxI}.cum_reward;
                     end
                 end
             end

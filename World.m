@@ -7,7 +7,13 @@ classdef World
         nodes
         travel
         node_status
+        dmcts_alpha
+        dmcts_beta
+        dmcts_gamma
+        dmcts_min_sampling_threshold
+        dmcts_max_rollout_depth
     end
+    
     
     methods
         %% initilalize
@@ -58,6 +64,5 @@ classdef World
             end
         end
     end
-    
 end
 
