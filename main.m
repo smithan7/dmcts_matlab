@@ -1,20 +1,20 @@
 close all
 clc
 
-com_mod = [1,10,50,100,250,500];
+com_mod = [1,10,50,100,250,500,750,1000];
 dropout_rate = [0.0, 0.025, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 1.0]; % p com drops
 min_sampling = [0.001,0.005,0.01,0.05,0.1,0.25,0.5, 0.75, 0.9, 0.95, 0.99, 1.0];
 alpha_set = [0.0, 0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99,1.0];
 beta_set = [0.141, 0.5, 1.0, 1.41, 2.0, 2.5, 5.0, 10.0];
 gamma_set = [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 0.999, 1.0]; 
-rollout_test = [0,1,2,3,5,7,10];
+rollout_set = [0,1,2,3,5,7,10];
 init_iters = 500;
 opt_iters = 2500;
 num_maps = 20;
 n_nodes = 20;
 
-test_var = com_mod;
-test_var_name = 'com mod';
+test_var = min_sampling;
+test_var_name = 'min sampling';
 n_test_var = length(test_var);
 
 big_coord_tracker = zeros(num_maps,n_test_var,init_iters + opt_iters);
