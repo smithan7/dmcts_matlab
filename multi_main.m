@@ -11,21 +11,19 @@ rollout_set = [0,1,2,3,5,7,10];
 init_iter_set = [0, 10, 50, 100, 250, 500, 1000];
 impact_set = [0,1];
 num_maps = 1;
-n_nodes = 5;
+n_nodes = 20;
 
 test_var = init_iter_set;
 test_var_name = 'init iters';
 n_test_var = length(test_var);
-total_iters = 30000;
+total_iters = 5000;
 
 big_coord_tracker = zeros(num_maps,n_test_var, total_iters);
-a_down_branch = zeros(num_maps, n_test_var, total_iters);
-b_down_branch = zeros(num_maps, n_test_var, total_iters);
 
 for map_iter = 1:num_maps
     clearvars -except big_coord_tracker test_iter test_var num_maps total_iters map_iter test_var_name n_nodes n_test_var
     %for test_iter = 1:n_test_var
-    percent_done = (map_iter-1)/num_maps
+    percent_done = (map_iter-1)/num_maps;
     for test_iter = 1:1%n_test_var
         coord_temp = zeros(1,total_iters);
         a_temp = zeros(1,total_iters);
@@ -41,34 +39,27 @@ for map_iter = 1:num_maps
 
         %%%%%%%%%%%%%%%%%% Dist-MCTS Test %%%%%%%%%%%%%%%%%%%%%%
         agents = {};
-        %a_dmcts = Dist_MCTS(1, -1, time, depth, G.node_status, max_depth, G, 1);
         agents{1} = Dist_MCTS(1, -1, time, depth, G.node_status, max_depth, G, 1);
-        %b_dmcts = Dist_MCTS(n_nodes, -1, time, depth, G.node_status, max_depth, G, 2);
         agents{2} = Dist_MCTS(n_nodes, -1, time, depth, G.node_status, max_depth, G, 2);
+        agents{3} = Dist_MCTS(floor(n_nodes/2), -1, time, depth, G.node_status, max_depth, G, 3);
+        
         team_coord = Coordinator(n_nodes);
-        %a_coord = Coordinator(n_nodes);
-        %b_coord = Coordinator(n_nodes);
-        %c_coord = Coordinator(n_nodes);
+
         for iter=1:G.total_iters
+          
             for a=1:length(agents)
-                agents{a}.mcts_search(G, team_coord);
+                agents{a} = agents{a}.mcts_search(G, team_coord);
             end
-            %a_dmcts = a_dmcts.mcts_search(G, b_coord);
-            %b_dmcts = b_dmcts.mcts_search(G, a_coord);
 
             if iter >= G.init_iters     
                 if rand() > G.dropout_rate && mod(iter,G.com_mod) == 0
                     for a=1:length(agents)
                         [agents{a}, team_coord] = agents{a}.sample_tree(team_coord);
                     end
-                    %[a_dmcts, a_coord] = a_dmcts.sample_tree(a_coord);
-                    %[b_dmcts, b_coord] = b_dmcts.sample_tree(b_coord);
                 else
                     for a=1:length(agents)
-                        agents{a} = agents{a}.mcts_search(G, team_coord);
+                        [agents{a}, ~] = agents{a}.sample_tree(team_coord);
                     end
-                    %[a_dmcts, ~] = a_dmcts.sample_tree(a_coord);
-                    %[b_dmcts, ~] = b_dmcts.sample_tree(b_coord);
                 end
             end
 
@@ -80,7 +71,7 @@ for map_iter = 1:num_maps
                 paths{a,1} = t_path;
             end
             
-            if mod(iter,1) == 0
+            if mod(iter,50) == 0
                 figure(3)
                     hold off
                     for i=1:n_nodes
@@ -95,8 +86,8 @@ for map_iter = 1:num_maps
                             sym = 'go';
                             co = 'g';
                         else
-                            sym = 'rx';
-                            co = 'r';
+                            sym = 'bo';
+                            co = 'b';
                         end
                         path = paths{ag};
                         for i=1:length(path(:,1))-1
@@ -106,6 +97,7 @@ for map_iter = 1:num_maps
                         plot(G.nodes{path(end,1)}.x, G.nodes{path(end,1)}.y, sym)
                     end
                 title(num2str(iter))
+                axis equal
                 pause(0.1);
             end
             coord_temp(iter) = G.evaluate_coord(paths);
@@ -115,14 +107,12 @@ for map_iter = 1:num_maps
             end
             
             %a_dmcts_path = a_dmcts.exploit();
-            %b_dmcts_path = b_dmcts.exploit();
+            %b_dmcts_path = b_dmcts.exploit()
             %coord_temp(i) = G.evaluate_coord(a_dmcts_path, b_dmcts_path);
             %a_temp(i) = a_dmcts.down_branch_reward;
             %b_temp(i) = b_dmcts.down_branch_reward;
         end
         big_coord_tracker(map_iter,test_iter,:) = coord_temp;
-        a_down_branch(test_iter, :) = a_temp;
-        b_down_branch(test_iter, :) = b_temp;
     end
 end
 

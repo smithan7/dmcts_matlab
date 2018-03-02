@@ -1,5 +1,6 @@
 classdef Dist_MCTS
     properties
+        agent_num % which agent am I?
         index % which node is it
         time % what time am I at
         my_reward % what am I worth?
@@ -8,10 +9,11 @@ classdef Dist_MCTS
         my_probability = 0 % how likely am I to be selected compared to other kids
         branch_probability = 0; % how likely is my branch to be selected
         depth % how deep in the tree am I?
-        max_depth = 9; % how deep in the tree can I go?
+        max_depth = 20; % how deep in the tree can I go?
         max_rollout_depth = 3; % if I'm a new kid, how deep do I go?
         node_status % state of the world at m node
         n_pulls = 0; % how many times have I been pulled?
+        cum_pulls = 0;
         min_sampling_threshold = 0.025; % how deep in the tree do I sample?
         alpha = 0.05; % gradient descent rate
         times; % when are my times
@@ -22,11 +24,7 @@ classdef Dist_MCTS
         mean_reward = 0.0; % cum reward / n_pulls
         travel_cost = 0.0; % dist from parent to me
         max_kid = -1; % used for debugging
-        
-        use_greedy = false;
-        use_ucb = false;
-        use_ducb = false;
-        use_ucb_m = true;
+        impact = 0;
         
         beta = 1.41;
         epsilon = 0.5;
@@ -34,13 +32,14 @@ classdef Dist_MCTS
         
     end
     methods
-        function  b = Dist_MCTS(ii, pi, ti, di, nsi, md, G)
+        function  b = Dist_MCTS(ii, pi, ti, di, nsi, md, G, ai)
             b.alpha = G.dmcts_alpha;
             b.beta = G.dmcts_beta;
             b.gamma = G.dmcts_gamma;
             b.min_sampling_threshold = G.dmcts_min_sampling_threshold;
             b.max_rollout_depth = G.dmcts_max_rollout_depth;
-            
+            b.impact = G.dmcts_impact;
+            b.agent_num = ai;
             b.index = ii;
             b.time = ti;
             b.depth = di;
@@ -52,7 +51,7 @@ classdef Dist_MCTS
                 b.travel_cost = G.travel(pi,ii);
             end
             
-            b.raw_reward = G.nodes{ii}.get_reward(ti);
+            b.raw_reward = G.nodes{ii}.get_reward(ti, b.impact);
             b.my_reward = b.raw_reward;
             b.down_branch_reward = 0.0;
             
@@ -81,42 +80,12 @@ classdef Dist_MCTS
             for i=1:length(G.nodes)
                 if obj.node_status(i)
                     t = obj.time + G.travel(obj.index, i);
-                    m = Dist_MCTS(i, obj.index, t, obj.depth+1, obj.node_status, obj.max_depth, G);
-                    m.prob_available = (1-coord.get_p_taken(m.index, m.time));
+                    m = Dist_MCTS(i, obj.index, t, obj.depth+1, obj.node_status, obj.max_depth, G, obj.agent_num);
+                    m.prob_available = (1-coord.get_p_taken(m.index, m.time, m.agent_num));
                     m.my_reward = m.prob_available * m.raw_reward;
                     m.down_branch_reward = m.rollout(i, t, 0, m.node_status, coord, G);
                     obj.kids{end+1} = m;
                 end
-            end
-        end
-        
-        %% UCB
-        function [obj, maxI] = ucb(obj)
-            obj.n_pulls = obj.n_pulls + 1;
-            minR = inf;
-            maxR = -inf;
-            for i=1:length(obj.kids)                    
-                if obj.kids{i}.down_branch_reward < minR
-                    minR = obj.kids{i}.down_branch_reward;
-                end
-                if obj.kids{i}.down_branch_reward > maxR
-                    maxR = obj.kids{i}.down_branch_reward;
-                end
-            end
-
-            if length(obj.kids) > 1
-                maxM = -1;
-                maxI = -1;
-                for i=1:length(obj.kids)
-                    rr = (obj.kids{i}.down_branch_reward-minR) / max(0.0001,(maxR-minR));
-                    ee = obj.kids{i}.beta*sqrt(obj.kids{i}.epsilon*log(obj.n_pulls)/max(0.1,obj.kids{i}.n_pulls));
-                    if rr + ee > maxM
-                        maxM = rr + ee;
-                        maxI = i;
-                    end
-                end
-            else
-                maxI = 1;
             end
         end
         
@@ -135,7 +104,7 @@ classdef Dist_MCTS
                     minR = obj.kids{i}.mean_reward;
                 end
                 if obj.kids{i}.mean_reward > maxR
-                    maxR = obj.kids{i}.mean_reward / max(0.01,obj.kids{i}.n_pulls);
+                    maxR = obj.kids{i}.mean_reward;
                 end
             end
 
@@ -156,58 +125,11 @@ classdef Dist_MCTS
             end
         end
         
-        %% D-UCB
-        function [obj, maxI] = ducb(obj)
-            obj.n_pulls = obj.n_pulls + 1;
-            minR = inf;
-            maxR = -inf;
-            for i=1:length(obj.kids)                    
-                if obj.kids{i}.down_branch_reward < minR
-                    minR = obj.kids{i}.down_branch_reward;
-                end
-                if obj.kids{i}.down_branch_reward > maxR
-                    maxR = obj.kids{i}.down_branch_reward;
-                end
-            end
-
-            if length(obj.kids) > 1
-                maxM = -1;
-                maxI = -1;
-                for i=1:length(obj.kids)
-                    obj.kids{i}.n_pulls = obj.kids{i}.gamma * obj.kids{i}.n_pulls;
-                    ee = obj.kids{i}.beta*sqrt(obj.kids{i}.epsilon*log(obj.n_pulls)/max(0.01,obj.kids{i}.n_pulls));
-                    rr = (obj.kids{i}.down_branch_reward-minR) / max(0.01,(maxR-minR));
-                    if rr + ee > maxM
-                        maxM = rr + ee;
-                        maxI = i;
-                    end
-                end 
-            else
-                maxI = 1;
-            end
-        end
-        
-         %% Greedy
-        function [obj, maxI] = greedy(obj)
-            obj.n_pulls = obj.n_pulls + 1;
-            maxI = -1;
-            maxR = -inf;
-            for i=1:length(obj.kids)                    
-                if obj.kids{i}.down_branch_reward > maxR
-                    maxR = obj.kids{i}.down_branch_reward;
-                    maxI = i;
-                end
-            end
-        end
-        
-        
         %% Rollout kids
         function reward = rollout(obj, start, current_time, rollout_depth, node_status, coord, G)
             rollout_depth = rollout_depth + 1;
             if rollout_depth > obj.max_rollout_depth
-                n = G.nodes{start};
-                n.get_reward(current_time);
-                reward = G.nodes{start}.get_reward(current_time);
+                reward = G.nodes{start}.get_reward(current_time, obj.impact, coord);
                 return
             end
             
@@ -217,8 +139,8 @@ classdef Dist_MCTS
             for i=1:G.n_nodes
                 if node_status(i)
                     t = current_time + G.travel(i,start);
-                    raw_r = G.nodes{i}.get_reward(t);
-                    p = (1-coord.get_p_taken(i, t));
+                    raw_r = G.nodes{i}.get_reward(t, obj.impact, coord);
+                    p = (1-coord.get_p_taken(i, t, obj.agent_num));
                     r = p * raw_r;
                     if r > maxR
                         maxR = r;
@@ -229,20 +151,22 @@ classdef Dist_MCTS
             if maxI > 0
                 node_status(maxI) = 0;
                 current_time = current_time + G.travel(maxI,start);
-                reward = G.nodes{start}.get_reward(current_time) + obj.rollout(maxI, current_time, rollout_depth, node_status, coord, G);
+                reward = G.nodes{start}.get_reward(current_time, obj.impact, coord) + obj.rollout(maxI, current_time, rollout_depth, node_status, coord, G);
             else
                 n = G.nodes{start};
-                n.get_reward(current_time);
-                reward = G.nodes{start}.get_reward(current_time);
+                n.get_reward(current_time, obj.impact, coord);
+                reward = G.nodes{start}.get_reward(current_time, obj.impact, coord);
                 return
             end
         end
         
         %% MCTS search tree
         function obj = mcts_search(obj, G, coord)
+            obj.cum_pulls = obj.cum_pulls + 1;
             
             % update my reward with coord info
-            p_rem =  (1-coord.get_p_taken(obj.index, obj.time));
+            p_rem =  (1-coord.get_p_taken(obj.index, obj.time, obj.agent_num));
+            
             if p_rem ~= obj.prob_available
                 obj.prob_available = p_rem;
                 obj.my_reward = p_rem * obj.raw_reward;
@@ -261,22 +185,20 @@ classdef Dist_MCTS
                     return;
                 else
                     obj = obj.sample_kids(); % do initial sampling
+                    maxR = -Inf;
+                    for i=1:length(obj.kids)
+                        if obj.kids{i}.down_branch_reward > maxR
+                            maxR = obj.kids{i}.down_branch_reward;
+                            obj.max_kid = i;
+                        end
+                    end
+                    % update my down branch reward
+                    obj.down_branch_reward = obj.my_reward + maxR;
                 end
             else
 
                 % select next kid to search
-                if obj.use_ucb
-                    [obj, maxI] = obj.ucb();
-                end
-                if obj.use_ucb_m
-                    [obj, maxI] = obj.ucb_m();
-                end
-                if obj.use_ducb
-                   [obj, maxI] = obj.ducb();
-                end
-                if obj.use_greedy
-                    [obj, maxI] = obj.greedy();
-                end
+                [obj, maxI] = obj.ucb_m();
 
                 % search selected kid
                 if maxI > -1
@@ -304,10 +226,10 @@ classdef Dist_MCTS
         
         %% updates probable actions
         function [obj, coord] = sample_tree(obj, coord)
-            if obj.depth == 1
-                coord = coord.reset();
+            if obj.depth
+                coord.reset(obj.agent_num);
             end
-            coord = coord.add_claim(obj.index, obj.time, obj.branch_probability);
+            coord = coord.add_claim(obj.index, obj.time, obj.branch_probability, obj.agent_num);
             
             if isempty(obj.kids)
                 return
@@ -362,14 +284,16 @@ classdef Dist_MCTS
             end
             
             maxI = -1;
-            maxR = -Inf;
+            maxR = 0.0;
             for i=1:length(obj.kids)
                 if obj.kids{i}.down_branch_reward > maxR
                     maxR = obj.kids{i}.down_branch_reward;
                     maxI = i;
                 end
             end
-            best_path = obj.kids{maxI}.exploit(best_path);
+            if maxI > 0
+                best_path = obj.kids{maxI}.exploit(best_path);
+            end
         end
     end
     %%%%%%%%%%%%%%%%%% END Dist-MCTS CLASS %%%%%%%%%%%%%%%%%%
