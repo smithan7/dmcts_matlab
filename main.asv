@@ -3,18 +3,18 @@ clc
 
 com_mod = [1,10,50,100,250,500];
 dropout_rate = [0.0, 0.025, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 1.0]; % p com drops
-min_sampling = [0.001,0.005,0.01,0.05,0.1,0.25,0.5, 0.75, 0.9, 0.95, 0.99, 1.0];
+min_sampling = [0.001,0.005,0.01,0.05,0.1,0.25,0.5];
 alpha_set = [0.0, 0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99,1.0];
 beta_set = [0.141, 0.5, 1.0, 1.41, 2.0, 2.5, 5.0, 10.0];
 gamma_set = [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 0.999, 1.0]; 
-rollout_test = [0,1,2,3,5,7,10];
+rollout_test = [0,1,2,3,5,7,10,15,20];
 init_iters = 500;
 opt_iters = 2500;
-num_maps = 20;
+num_maps = 1;
 n_nodes = 20;
 
-test_var = com_mod;
-test_var_name = 'com mod';
+test_var = gamma_set;
+test_var_name = 'gamma';
 n_test_var = length(test_var);
 
 big_coord_tracker = zeros(num_maps,n_test_var,init_iters + opt_iters);
@@ -35,7 +35,7 @@ for map_iter = 1:num_maps
             if strcmp(test_var_name, 'alpha')
                 G.dmcts_alpha = test_var(test_iter); % gradient descent on agent policy
             else
-                G.dmcts_alpha = 0.95;
+                G.dmcts_alpha = 0.05;
             end
             if strcmp(test_var_name,'beta')
                 G.dmcts_beta = test_var(test_iter); % explore vs exploit
@@ -60,18 +60,18 @@ for map_iter = 1:num_maps
                 com_mod = 10; % how many do I transmit
             end
             
-            if strcmp(test_var_name,'min sampling')
+            if strcmp(test_var_name,'min sampling threshold')
                 G.dmcts_min_sampling_threshold = test_var(test_iter); % how far down the tree do I sample
             else
-                G.dmcts_min_sampling_threshold = 0.25; % how far down the tree do I sample
+                G.dmcts_min_sampling_threshold = 0.01; % how far down the tree do I sample
             end
 
-            if strcmp(test_var_name,'rollout')
+            if strcmp(test_var_name,'max rollout depth')
                 G.dmcts_max_rollout_depth = test_var(test_iter); %rollout_test(test_iter);
             else
                 G.dmcts_max_rollout_depth = 1; %rollout_test(test_iter);
             end
-       end
+        end
         
         time = 0;
         depth = 1;

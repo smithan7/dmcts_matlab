@@ -1,0 +1,375 @@
+classdef Dist_MCTS
+    properties
+        index % which node is it
+        time % what time am I at
+        my_reward % what am I worth?
+        down_branch_reward = 0; % how much are the line of my best children worth
+        kids % my  kid nodes
+        my_probability = 0 % how likely am I to be selected compared to other kids
+        branch_probability = 0; % how likely is my branch to be selected
+        depth % how deep in the tree am I?
+        max_depth = 9; % how deep in the tree can I go?
+        max_rollout_depth = 3; % if I'm a new kid, how deep do I go?
+        node_status % state of the world at m node
+        n_pulls = 0; % how many times have I been pulled?
+        min_sampling_threshold = 0.025; % how deep in the tree do I sample?
+        alpha = 0.05; % gradient descent rate
+        times; % when are my times
+        probs; % how strong are my claims
+        prob_available = 1.0; % how likely is it that I am available
+        raw_reward = 0.0; % how much am I worth unclaimed
+        cum_reward = 0.0; % what is the total cumulative reward across all pulls
+        travel_cost = 0.0; % dist from parent to me
+        max_kid = -1; % used for debugging
+        
+        use_greedy = false;
+        use_ucb = false;
+        use_ducb = false;
+        use_m_ucb = true;
+        
+        beta = 1.41;
+        epsilon = 0.5;
+        gamma = 1.0;
+        
+    end
+    methods
+        function  b = Dist_MCTS(ii, pi, ti, di, nsi, md, G)
+            b.alpha = G.dmcts_alpha;
+            b.beta = G.dmcts_beta;
+            b.gamma = G.dmcts_gamma;
+            b.min_sampling_threshold = G.dmcts_min_sampling_threshold;
+            b.max_rollout_depth = G.dmcts_max_rollout_depth;
+            
+            b.index = ii;
+            b.time = ti;
+            b.depth = di;
+            if di == 1
+                b.my_probability = 1;
+                b.branch_probability = 1;
+                b.travel_cost = 0.0;
+            else
+                b.travel_cost = G.travel(pi,ii);
+            end
+            
+            b.raw_reward = G.nodes{ii}.get_reward(ti);
+            b.my_reward = b.raw_reward;
+            b.down_branch_reward = 0.0;
+            
+            b.node_status = nsi;
+            b.node_status(ii)= 0;
+            b.max_depth = md;
+        end
+        
+        %% plot tree distribution of each task
+        function [times, probs] = plot_task_probs(obj, index, times, probs)
+            if obj.index == index
+                times(end+1) = obj.time;
+                probs(end+1) = obj.branch_probability;
+                return
+            else
+                for i=1:length(obj.kids)
+                    if obj.kids{i}.branch_probability > obj.min_sampling_threshold
+                        [times, probs] = obj.kids{i}.plot_task_probs(index, times, probs);
+                    end
+                end
+            end
+        end
+        
+        %% make kids
+        function obj = make_kids(obj, G, coord)
+            for i=1:length(G.nodes)
+                if obj.node_status(i)
+                    t = obj.time + G.travel(obj.index, i);
+                    m = Dist_MCTS(i, obj.index, t, obj.depth+1, obj.node_status, obj.max_depth, G);
+                    m.prob_available = (1-coord.get_p_taken(m.index, m.time));
+                    m.my_reward = m.prob_available * m.raw_reward;
+                    m.down_branch_reward = m.rollout(i, t, 0, m.node_status, coord, G);
+                    obj.kids{end+1} = m;
+                end
+            end
+        end
+        
+        %% UCB
+        function [obj, maxI] = ucb(obj)
+            obj.n_pulls = obj.n_pulls + 1;
+            minR = inf;
+            maxR = -inf;
+            for i=1:length(obj.kids)                    
+                if obj.kids{i}.down_branch_reward < minR
+                    minR = obj.kids{i}.down_branch_reward;
+                end
+                if obj.kids{i}.down_branch_reward > maxR
+                    maxR = obj.kids{i}.down_branch_reward;
+                end
+            end
+
+            if length(obj.kids) > 1
+                maxM = -1;
+                maxI = -1;
+                for i=1:length(obj.kids)
+                    rr = (obj.kids{i}.down_branch_reward-minR) / max(0.0001,(maxR-minR));
+                    ee = obj.kids{i}.beta*sqrt(obj.kids{i}.epsilon*log(obj.n_pulls)/max(0.1,obj.kids{i}.n_pulls));
+                    if rr + ee > maxM
+                        maxM = rr + ee;
+                        maxI = i;
+                    end
+                end
+            else
+                maxI = 1;
+            end
+        end
+        
+        %% UCB Mean
+        % exactly the same as other ucb, but uses the historical mean value
+        % of the cumulative reward to pick child. Works with D-UCB by
+        % adding a Gamma
+        function [obj, maxI] = ucb_m(obj)
+            obj.n_pulls = obj.n_pulls + 1;
+            minR = inf;
+            maxR = -inf;
+            for i=1:length(obj.kids)
+                obj.kids{i}.cum_reward = obj.kids{i}.cum_reward * obj.gamma;
+                obj.kids{i}.mean_reward = obj.kids{i}.cum_reward / max(0.01,obj.kid{i}.n_pulls);
+                if obj.kids{i}.mean_reward < minR
+                    minR = mean_reward;
+                end
+                if obj.kids{i}.mean_reward > maxR
+                    maxR = obj.kids{i}.mean_reward / max(0.01,obj.kid{i}.n_pulls);
+                end
+            end
+
+            if length(obj.kids) > 1
+                maxM = -1;
+                maxI = -1;
+                for i=1:length(obj.kids)
+                    rr = (obj.kids{i}.mean_reward-minR) / max(0.01,(maxR-minR));
+                    obj.kids{i}.n_pulls = obj.kids{i}.n_pulls * obj.gamma;
+                    ee = obj.kids{i}.beta*sqrt(obj.kids{i}.epsilon*log(obj.n_pulls)/max(0.01,obj.kids{i}.n_pulls));
+                    if rr + ee > maxM
+                        maxM = rr + ee;
+                        maxI = i;
+                    end
+                end
+            else
+                maxI = 1;
+            end
+        end
+        
+        %% D-UCB
+        function [obj, maxI] = ducb(obj)
+            obj.n_pulls = obj.n_pulls + 1;
+            minR = inf;
+            maxR = -inf;
+            for i=1:length(obj.kids)                    
+                if obj.kids{i}.down_branch_reward < minR
+                    minR = obj.kids{i}.down_branch_reward;
+                end
+                if obj.kids{i}.down_branch_reward > maxR
+                    maxR = obj.kids{i}.down_branch_reward;
+                end
+            end
+
+            if length(obj.kids) > 1
+                maxM = -1;
+                maxI = -1;
+                for i=1:length(obj.kids)
+                    obj.kids{i}.n_pulls = obj.kids{i}.gamma * obj.kids{i}.n_pulls;
+                    ee = obj.kids{i}.beta*sqrt(obj.kids{i}.epsilon*log(obj.n_pulls)/max(0.01,obj.kids{i}.n_pulls));
+                    rr = (obj.kids{i}.down_branch_reward-minR) / max(0.01,(maxR-minR));
+                    if rr + ee > maxM
+                        maxM = rr + ee;
+                        maxI = i;
+                    end
+                end 
+            else
+                maxI = 1;
+            end
+        end
+        
+         %% Greedy
+        function [obj, maxI] = greedy(obj)
+            obj.n_pulls = obj.n_pulls + 1;
+            maxI = -1;
+            maxR = -inf;
+            for i=1:length(obj.kids)                    
+                if obj.kids{i}.down_branch_reward > maxR
+                    maxR = obj.kids{i}.down_branch_reward;
+                    maxI = i;
+                end
+            end
+        end
+        
+        
+        %% Rollout kids
+        function reward = rollout(obj, start, current_time, rollout_depth, node_status, coord, G)
+            rollout_depth = rollout_depth + 1;
+            if rollout_depth > obj.max_rollout_depth
+                n = G.nodes{start};
+                n.get_reward(current_time);
+                reward = G.nodes{start}.get_reward(current_time);
+                return
+            end
+            
+            node_status(start) = 0;
+            maxR = -Inf;
+            maxI = -1;
+            for i=1:G.n_nodes
+                if node_status(i)
+                    t = current_time + G.travel(i,start);
+                    raw_r = G.nodes{i}.get_reward(t);
+                    p = (1-coord.get_p_taken(i, t));
+                    r = p * raw_r;
+                    if r > maxR
+                        maxR = r;
+                        maxI = i;
+                    end
+                end
+            end
+            if maxI > 0
+                node_status(maxI) = 0;
+                current_time = current_time + G.travel(maxI,start);
+                reward = G.nodes{start}.get_reward(current_time) + obj.rollout(maxI, current_time, rollout_depth, node_status, coord, G);
+            else
+                n = G.nodes{start};
+                n.get_reward(current_time);
+                reward = G.nodes{start}.get_reward(current_time);
+                return
+            end
+        end
+        
+        %% MCTS search tree
+        function obj = mcts_search(obj, G, coord)
+            
+            % update my reward with coord info
+            p_rem =  (1-coord.get_p_taken(obj.index, obj.time));
+            if p_rem ~= obj.prob_available
+                obj.prob_available = p_rem;
+                obj.my_reward = p_rem * obj.raw_reward;
+            end
+            
+            if obj.depth > obj.max_depth
+                obj.down_branch_reward = obj.my_reward;
+                return
+            end
+            
+            % make kids if I need to
+            if isempty(obj.kids)
+                obj = obj.make_kids(G, coord);
+                if isempty(obj.kids)
+                    obj.down_branch_reward = obj.my_reward;
+                    return;
+                else
+                    obj = obj.sample_kids(); % do initial sampling
+                end
+            else
+
+                % select next kid to search
+                if obj.use_ucb
+                    [obj, maxI] = obj.ucb();
+                end
+                if obj.use_ucb_m
+                    [obj, maxI] = obj.ucb_m();
+                end
+                if obj.use_ducb
+                   [obj, maxI] = obj.ducb();
+                end
+                if obj.use_greedy
+                    [obj, maxI] = obj.greedy();
+                end
+
+                % search selected kid
+                if maxI > -1
+                    obj.kids{maxI} = obj.kids{maxI}.mcts_search(G, coord);
+                    maxR = -Inf;
+                    minR = Inf;
+                    for i=1:length(obj.kids)
+                        if obj.kids{i}.down_branch_reward < minR
+                            minR = obj.kids{i}.down_branch_reward;
+                        end
+                        if obj.kids{i}.down_branch_reward > maxR
+                            maxR = obj.kids{i}.down_branch_reward;
+                            obj.max_kid = i;
+                        end
+                    end
+                    % update my down branch reward
+                    obj.down_branch_reward = obj.my_reward + maxR;
+                    if maxI > 0
+                        % update searched kids cumulative reward
+                        obj.kids{maxI}.cum_reward = (obj.kids{maxI}.down_branch_reward-minR) / max(0.001, maxR-minR) + obj.kids{maxI}.cum_reward;
+                    end
+                end
+            end
+        end
+        
+        %% updates probable actions
+        function [obj, coord] = sample_tree(obj, coord)
+            if obj.depth == 1
+                coord = coord.reset();
+            end
+            coord = coord.add_claim(obj.index, obj.time, obj.branch_probability);
+            
+            if isempty(obj.kids)
+                return
+            end
+            maxR = -inf;
+            maxI = -1;
+            for i=1:length(obj.kids)
+                if obj.kids{i}.down_branch_reward > maxR
+                    maxR = obj.kids{i}.down_branch_reward;
+                    maxI = i;
+                end
+            end
+            
+            sumPP = 0.0;
+            for i=1:length(obj.kids)
+                if i == maxI
+                    obj.kids{i}.my_probability =  obj.kids{i}.my_probability + obj.alpha*(1 - obj.kids{i}.my_probability);
+                else
+                    obj.kids{i}.my_probability =  obj.kids{i}.my_probability + obj.alpha*(0 - obj.kids{i}.my_probability);
+                end
+                sumPP = sumPP+ obj.kids{i}.my_probability;
+            end
+            
+            for i=1:length(obj.kids)
+               obj.kids{i}.my_probability = obj.kids{i}.my_probability/sumPP;  % normalize
+               obj.kids{i}.branch_probability = obj.branch_probability * obj.kids{i}.my_probability;
+               if obj.kids{i}.branch_probability > obj.min_sampling_threshold
+                   [obj.kids{i}, coord] = obj.kids{i}.sample_tree(coord);
+               end
+            end
+        end
+        
+        %% creates initial estimate of probable actions
+        function obj = sample_kids(obj)
+            sumR = 0;
+            for i=1:length(obj.kids)
+                sumR = sumR + obj.kids{i}.down_branch_reward;
+            end
+            % minR / maxR does NOT work, puts all 0 to 1 individually,
+            % allowing multiple to be 1.0
+            for i=1:length(obj.kids)
+                obj.kids{i}.my_probability = obj.kids{i}.down_branch_reward/sumR;
+                obj.kids{i}.branch_probability = obj.branch_probability * obj.kids{i}.my_probability;
+            end
+        end
+        
+        %% exploit tree
+        function best_path = exploit(obj, best_path)
+            best_path(end+1,:) = [obj.index; obj.time; obj.my_reward];
+            if obj.depth > obj.max_depth || isempty(obj.kids)
+                return
+            end
+            
+            maxI = -1;
+            maxR = -Inf;
+            for i=1:length(obj.kids)
+                if obj.kids{i}.down_branch_reward > maxR
+                    maxR = obj.kids{i}.down_branch_reward;
+                    maxI = i;
+                end
+            end
+            best_path = obj.kids{maxI}.exploit(best_path);
+        end
+    end
+    %%%%%%%%%%%%%%%%%% END Dist-MCTS CLASS %%%%%%%%%%%%%%%%%%
+end
